@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.gitignore
+.env
+.env.local
+.env.*.local
+.env.production
+.vscode
+.idea
+*.log
+README.md
+infuse_com.png
+.claude

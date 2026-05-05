@@ -1,0 +1,22 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: calendar-task-sidebar:latest
+    container_name: calendar-task-sidebar
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-3000}:3000"
+    env_file:
+      - .env.production
+    environment:
+      # Required when running behind a reverse proxy / on a non-localhost host.
+      # Auth.js v5 refuses to trust the Host header without this in production.
+      AUTH_TRUST_HOST: "true"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

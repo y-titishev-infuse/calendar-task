@@ -1,7 +1,8 @@
 export type CalendarEvent = {
   id: string;
   summary: string;
-  description?: string;
+  /** Sanitized HTML — safe to render via dangerouslySetInnerHTML. */
+  descriptionHtml?: string;
   start: string;
   end: string;
   attendees: string[];

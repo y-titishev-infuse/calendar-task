@@ -1,3 +1,4 @@
+import { sanitizeDescriptionHtml } from "./sanitizeHtml";
 import type { CalendarEvent } from "./types";
 
 type GoogleEvent = {
@@ -48,7 +49,9 @@ export async function listTodayEvents(accessToken: string): Promise<CalendarEven
     .map((e) => ({
       id: e.id,
       summary: e.summary ?? "(no title)",
-      description: e.description,
+      descriptionHtml: e.description
+        ? sanitizeDescriptionHtml(e.description)
+        : undefined,
       start: e.start!.dateTime!,
       end: e.end!.dateTime!,
       attendees:

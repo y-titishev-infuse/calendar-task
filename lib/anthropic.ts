@@ -1,6 +1,22 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { CalendarEvent, Question, Task } from "./types";
 
+function htmlToText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>(?=)/gi, "\n")
+    .replace(/<\/(p|li|div)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export const client = new Anthropic({
   baseURL: process.env.LLM_ORCHESTRATOR_BASE_URL,
   authToken: process.env.LLM_ORCHESTRATOR_API_KEY,
@@ -74,7 +90,7 @@ export async function generateQuestions(event: CalendarEvent): Promise<Question[
         role: "user",
         content: JSON.stringify({
           summary: event.summary,
-          description: event.description ?? "",
+          description: htmlToText(event.descriptionHtml ?? ""),
           start: event.start,
           end: event.end,
           attendees: event.attendees,
@@ -145,7 +161,7 @@ export async function generateTasks(items: EventWithAnswers[]): Promise<Task[]> 
             event: {
               id: i.event.id,
               summary: i.event.summary,
-              description: i.event.description ?? "",
+              description: htmlToText(i.event.descriptionHtml ?? ""),
               start: i.event.start,
               end: i.event.end,
               attendees: i.event.attendees,

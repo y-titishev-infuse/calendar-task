@@ -518,8 +518,11 @@ function EventCard({
             {event.attendees.length > 0 &&
               ` · ${event.attendees.length} attendee${event.attendees.length > 1 ? "s" : ""}`}
           </p>
-          {event.description && (
-            <p className="mt-2 text-sm text-ink/70 line-clamp-2">{event.description}</p>
+          {event.descriptionHtml && (
+            <div
+              className="event-description mt-2 text-sm text-ink/70"
+              dangerouslySetInnerHTML={{ __html: event.descriptionHtml }}
+            />
           )}
         </div>
         {!questions && (

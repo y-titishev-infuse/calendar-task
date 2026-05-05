@@ -162,7 +162,12 @@ export async function generateTasks(items: EventWithAnswers[]): Promise<Task[]> 
       const input = block.input as {
         tasks: { id: string; title: string; eventId?: string; dueBefore?: string }[];
       };
-      return (input.tasks ?? []).map((t) => ({ ...t, done: false }));
+      return (input.tasks ?? []).map((t) => ({
+        ...t,
+        done: false,
+        status: "pending" as const,
+        origin: "prep" as const,
+      }));
     }
   }
   return [];

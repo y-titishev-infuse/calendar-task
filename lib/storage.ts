@@ -1,6 +1,6 @@
 import type { DayState, Task } from "./types";
 
-const KEY = "infuse-tasks-v1";
+const KEY = "infuse-tasks-v2";
 
 export function todayKey(): string {
   const d = new Date();
@@ -8,7 +8,12 @@ export function todayKey(): string {
 }
 
 function emptyState(): DayState {
-  return { date: todayKey(), answers: {}, tasks: [] };
+  return {
+    date: todayKey(),
+    answers: {},
+    tasks: [],
+    addressedEventFollowups: [],
+  };
 }
 
 export function loadDayState(): DayState {
@@ -18,7 +23,11 @@ export function loadDayState(): DayState {
   try {
     const parsed = JSON.parse(raw) as DayState;
     if (parsed.date !== todayKey()) return emptyState();
-    return parsed;
+    return {
+      ...emptyState(),
+      ...parsed,
+      addressedEventFollowups: parsed.addressedEventFollowups ?? [],
+    };
   } catch {
     return emptyState();
   }
@@ -39,13 +48,46 @@ export function setAnswer(
   return { ...state, answers: { ...state.answers, [eventId]: eventAnswers } };
 }
 
-export function setTasks(state: DayState, tasks: Task[]): DayState {
-  return { ...state, tasks };
+export function replaceTasks(
+  state: DayState,
+  pendingTasks: Task[],
+  origin: "prep" | "followup",
+): DayState {
+  const others = state.tasks.filter(
+    (t) => !(t.origin === origin && t.status === "pending"),
+  );
+  return { ...state, tasks: [...others, ...pendingTasks] };
+}
+
+export function appendTasks(state: DayState, tasks: Task[]): DayState {
+  return { ...state, tasks: [...state.tasks, ...tasks] };
+}
+
+export function updateTask(
+  state: DayState,
+  taskId: string,
+  patch: Partial<Task>,
+): DayState {
+  return {
+    ...state,
+    tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t)),
+  };
+}
+
+export function removeTask(state: DayState, taskId: string): DayState {
+  return { ...state, tasks: state.tasks.filter((t) => t.id !== taskId) };
 }
 
 export function toggleTask(state: DayState, taskId: string): DayState {
+  return updateTask(state, taskId, {
+    done: !state.tasks.find((t) => t.id === taskId)?.done,
+  });
+}
+
+export function markFollowupAddressed(state: DayState, eventId: string): DayState {
+  if (state.addressedEventFollowups.includes(eventId)) return state;
   return {
     ...state,
-    tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, done: !t.done } : t)),
+    addressedEventFollowups: [...state.addressedEventFollowups, eventId],
   };
 }

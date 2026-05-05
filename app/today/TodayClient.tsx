@@ -116,7 +116,7 @@ export default function TodayClient({ events, loadError }: Props) {
     }
   }
 
-  async function pushToJira(taskIds: string[]) {
+  async function pushToJira(taskIds: string[]): Promise<boolean> {
     setPushing(true);
     setPushError(null);
     const tasksToPush = state.tasks.filter((t) => taskIds.includes(t.id));
@@ -178,24 +178,9 @@ export default function TodayClient({ events, loadError }: Props) {
   }
 
   async function approvePending() {
-    const pendingIds = pendingTasks.map((t) => t.id);
-    if (pendingIds.length === 0) return;
-    await pushToJira(pendingIds);
-  }
-
-  function discardPending() {
-    setState((s) => ({
-      ...s,
-      tasks: s.tasks.filter((t) => t.status !== "pending"),
-    }));
-  }
-
-  function editPendingTask(id: string, patch: Partial<Task>) {
-    setState((s) => updateTask(s, id, patch));
-  }
-
-  function deletePendingTask(id: string) {
-    setState((s) => removeTask(s, id));
+    const ids = pendingTasks.map((t) => t.id);
+    if (ids.length === 0) return;
+    await pushToJira(ids);
   }
 
   async function submitFollowup(event: CalendarEvent, titles: string[]) {
@@ -214,9 +199,7 @@ export default function TodayClient({ events, loadError }: Props) {
     }));
     setState((s) => appendTasks(s, newTasks));
     const ok = await pushToJira(newTasks.map((t) => t.id));
-    if (ok) {
-      setState((s) => markFollowupAddressed(s, event.id));
-    }
+    if (ok) setState((s) => markFollowupAddressed(s, event.id));
   }
 
   function skipFollowup(eventId: string) {
@@ -225,7 +208,17 @@ export default function TodayClient({ events, loadError }: Props) {
 
   return (
     <>
-      <Sidebar tasks={approvedTasks} onToggle={(id) => setState((s) => toggleTask(s, id))} />
+      <Sidebar
+        pendingTasks={pendingTasks}
+        approvedTasks={approvedTasks}
+        eventsById={eventsById}
+        pushing={pushing}
+        pushError={pushError}
+        onApprove={approvePending}
+        onEditPending={(id, patch) => setState((s) => updateTask(s, id, patch))}
+        onDeletePending={(id) => setState((s) => removeTask(s, id))}
+        onToggleApproved={(id) => setState((s) => toggleTask(s, id))}
+      />
 
       <main className="flex-1 ml-[320px] px-8 py-10 max-w-3xl">
         <header className="mb-8">
@@ -292,93 +285,206 @@ export default function TodayClient({ events, loadError }: Props) {
             {genError && <p className="mt-2 text-sm text-red-700">{genError}</p>}
           </div>
         )}
-
-        {pendingTasks.length > 0 && (
-          <ReviewPane
-            tasks={pendingTasks}
-            eventsById={eventsById}
-            pushing={pushing}
-            pushError={pushError}
-            onEdit={editPendingTask}
-            onDelete={deletePendingTask}
-            onApprove={approvePending}
-            onDiscard={discardPending}
-          />
-        )}
       </main>
     </>
   );
 }
 
 function Sidebar({
-  tasks,
-  onToggle,
+  pendingTasks,
+  approvedTasks,
+  eventsById,
+  pushing,
+  pushError,
+  onApprove,
+  onEditPending,
+  onDeletePending,
+  onToggleApproved,
 }: {
-  tasks: Task[];
-  onToggle: (id: string) => void;
+  pendingTasks: Task[];
+  approvedTasks: Task[];
+  eventsById: Record<string, CalendarEvent>;
+  pushing: boolean;
+  pushError: string | null;
+  onApprove: () => void;
+  onEditPending: (id: string, patch: Partial<Task>) => void;
+  onDeletePending: (id: string) => void;
+  onToggleApproved: (id: string) => void;
 }) {
-  const done = tasks.filter((t) => t.done).length;
+  const done = approvedTasks.filter((t) => t.done).length;
+  const hasPending = pendingTasks.length > 0;
 
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-[320px] bg-white border-r border-ink/10 overflow-y-auto">
+    <aside className="fixed left-0 top-0 bottom-0 w-[320px] bg-white border-r border-ink/10 overflow-y-auto flex flex-col">
       <div className="p-5 border-b border-ink/10">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-ink/60">
           Today's Tasks
         </h2>
         <p className="mt-1 text-2xl font-semibold tabular-nums">
-          {done} <span className="text-ink/30">/ {tasks.length}</span>
+          {done} <span className="text-ink/30">/ {approvedTasks.length}</span>
         </p>
       </div>
-      <ul className="p-3 space-y-1">
-        {tasks.length === 0 && (
-          <li className="px-2 py-3 text-sm text-ink/50">
-            Approved tasks appear here. Generate, review, then approve.
-          </li>
+
+      {hasPending && (
+        <div className="p-4 border-b border-ink/10 bg-accent/5">
+          <button
+            onClick={onApprove}
+            disabled={pushing}
+            className="w-full px-3 py-2 rounded-md bg-accent text-white text-sm font-medium disabled:bg-ink/20 disabled:text-ink/50 hover:opacity-90 transition"
+          >
+            {pushing
+              ? "Pushing to Jira…"
+              : `Approve & push to Jira (${pendingTasks.length})`}
+          </button>
+          {pushError && (
+            <p className="mt-2 text-xs text-red-700">{pushError}</p>
+          )}
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto">
+        {hasPending && (
+          <section>
+            <h3 className="px-4 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-ink/40">
+              Pending review · {pendingTasks.length}
+            </h3>
+            <ul className="px-2 pb-2 space-y-1">
+              {pendingTasks.map((task) => (
+                <PendingRow
+                  key={task.id}
+                  task={task}
+                  event={task.eventId ? eventsById[task.eventId] : undefined}
+                  onEdit={(patch) => onEditPending(task.id, patch)}
+                  onDelete={() => onDeletePending(task.id)}
+                />
+              ))}
+            </ul>
+          </section>
         )}
-        {tasks.map((task) => {
-          const dueLabel = task.dueBefore
-            ? new Date(task.dueBefore).toLocaleTimeString([], {
+
+        <section>
+          {hasPending && (
+            <h3 className="px-4 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-ink/40">
+              Approved · {approvedTasks.length}
+            </h3>
+          )}
+          <ul className="px-2 pb-3 space-y-1">
+            {approvedTasks.length === 0 && !hasPending && (
+              <li className="px-2 py-3 text-sm text-ink/50">
+                Answer prep questions on the right, then generate tasks.
+              </li>
+            )}
+            {approvedTasks.map((task) => (
+              <ApprovedRow
+                key={task.id}
+                task={task}
+                onToggle={() => onToggleApproved(task.id)}
+              />
+            ))}
+          </ul>
+        </section>
+      </div>
+    </aside>
+  );
+}
+
+function PendingRow({
+  task,
+  event,
+  onEdit,
+  onDelete,
+}: {
+  task: Task;
+  event: CalendarEvent | undefined;
+  onEdit: (patch: Partial<Task>) => void;
+  onDelete: () => void;
+}) {
+  return (
+    <li className="px-2 py-2 rounded border border-dashed border-accent/40 bg-white">
+      <div className="flex items-start gap-1">
+        <input
+          type="text"
+          value={task.title}
+          onChange={(e) => onEdit({ title: e.target.value })}
+          className="flex-1 min-w-0 text-sm bg-transparent border-0 px-1 py-0.5 focus:outline-none focus:bg-ink/5 rounded"
+        />
+        <button
+          onClick={onDelete}
+          className="text-ink/40 hover:text-red-700 px-1 leading-none"
+          aria-label="Remove task"
+          title="Remove"
+        >
+          ×
+        </button>
+      </div>
+      {(event || task.dueBefore) && (
+        <div className="mt-0.5 px-1 text-[11px] text-ink/50 truncate">
+          {event && <span className="truncate">{event.summary}</span>}
+          {task.dueBefore && (
+            <span className="ml-1 text-accent">
+              before{" "}
+              {new Date(task.dueBefore).toLocaleTimeString([], {
                 hour: "2-digit",
                 minute: "2-digit",
-              })
-            : null;
-          return (
-            <li key={task.id}>
-              <label className="flex items-start gap-2 px-2 py-2 rounded hover:bg-ink/5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={task.done}
-                  onChange={() => onToggle(task.id)}
-                  className="mt-1 accent-accent"
-                />
-                <div className="flex-1 text-sm min-w-0">
-                  <span className={task.done ? "line-through text-ink/40" : ""}>
-                    {task.title}
-                  </span>
-                  <div className="flex items-center gap-2 text-xs">
-                    {dueLabel && <span className="text-accent">before {dueLabel}</span>}
-                    {task.jiraKey && task.jiraUrl && (
-                      <a
-                        href={task.jiraUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-blue-700 hover:underline"
-                      >
-                        {task.jiraKey}
-                      </a>
-                    )}
-                    {task.origin === "followup" && (
-                      <span className="text-ink/40">follow-up</span>
-                    )}
-                  </div>
-                </div>
-              </label>
-            </li>
-          );
-        })}
-      </ul>
-    </aside>
+              })}
+            </span>
+          )}
+          {task.origin === "followup" && (
+            <span className="ml-1">· follow-up</span>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function ApprovedRow({
+  task,
+  onToggle,
+}: {
+  task: Task;
+  onToggle: () => void;
+}) {
+  const dueLabel = task.dueBefore
+    ? new Date(task.dueBefore).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+
+  return (
+    <li>
+      <label className="flex items-start gap-2 px-2 py-2 rounded hover:bg-ink/5 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={task.done}
+          onChange={onToggle}
+          className="mt-1 accent-accent"
+        />
+        <div className="flex-1 text-sm min-w-0">
+          <span className={task.done ? "line-through text-ink/40" : ""}>
+            {task.title}
+          </span>
+          <div className="flex items-center gap-2 text-xs">
+            {dueLabel && <span className="text-accent">before {dueLabel}</span>}
+            {task.jiraKey && task.jiraUrl && (
+              <a
+                href={task.jiraUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-blue-700 hover:underline"
+              >
+                {task.jiraKey}
+              </a>
+            )}
+            {task.origin === "followup" && (
+              <span className="text-ink/40">follow-up</span>
+            )}
+          </div>
+        </div>
+      </label>
+    </li>
   );
 }
 
@@ -446,104 +552,6 @@ function EventCard({
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-function ReviewPane({
-  tasks,
-  eventsById,
-  pushing,
-  pushError,
-  onEdit,
-  onDelete,
-  onApprove,
-  onDiscard,
-}: {
-  tasks: Task[];
-  eventsById: Record<string, CalendarEvent>;
-  pushing: boolean;
-  pushError: string | null;
-  onEdit: (id: string, patch: Partial<Task>) => void;
-  onDelete: (id: string) => void;
-  onApprove: () => void;
-  onDiscard: () => void;
-}) {
-  return (
-    <div className="mt-10 border-2 border-accent/40 rounded-lg p-5 bg-white">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h2 className="font-semibold">Review tasks</h2>
-          <p className="text-xs text-ink/60">
-            Edit, delete, or approve. Approved tasks are pushed to Jira.
-          </p>
-        </div>
-      </div>
-
-      <ul className="space-y-2">
-        {tasks.map((task) => {
-          const event = task.eventId ? eventsById[task.eventId] : undefined;
-          const dueValue = task.dueBefore
-            ? new Date(task.dueBefore).toISOString().slice(0, 16)
-            : "";
-          return (
-            <li key={task.id} className="flex items-start gap-2">
-              <div className="flex-1 space-y-1">
-                <input
-                  type="text"
-                  value={task.title}
-                  onChange={(e) => onEdit(task.id, { title: e.target.value })}
-                  className="w-full px-3 py-1.5 text-sm border border-ink/15 rounded focus:outline-none focus:border-accent"
-                />
-                <div className="flex items-center gap-2 text-xs text-ink/60">
-                  {event && <span className="truncate">{event.summary}</span>}
-                  <input
-                    type="datetime-local"
-                    value={dueValue}
-                    onChange={(e) =>
-                      onEdit(task.id, {
-                        dueBefore: e.target.value
-                          ? new Date(e.target.value).toISOString()
-                          : undefined,
-                      })
-                    }
-                    className="px-2 py-0.5 border border-ink/15 rounded"
-                  />
-                </div>
-              </div>
-              <button
-                onClick={() => onDelete(task.id)}
-                className="text-ink/50 hover:text-red-700 px-2 py-1"
-                aria-label="Delete task"
-                title="Delete"
-              >
-                ×
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-
-      {pushError && (
-        <p className="mt-3 text-sm text-red-700">{pushError}</p>
-      )}
-
-      <div className="mt-4 flex items-center gap-3">
-        <button
-          onClick={onApprove}
-          disabled={pushing || tasks.length === 0}
-          className="px-4 py-2 rounded-md bg-accent text-white disabled:bg-ink/20 disabled:text-ink/50 hover:opacity-90 transition"
-        >
-          {pushing ? "Pushing to Jira…" : `Approve & push to Jira (${tasks.length})`}
-        </button>
-        <button
-          onClick={onDiscard}
-          disabled={pushing}
-          className="text-sm text-ink/60 hover:text-ink underline"
-        >
-          Discard
-        </button>
-      </div>
     </div>
   );
 }

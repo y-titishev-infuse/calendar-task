@@ -10,12 +10,15 @@ import type {
 } from "@/lib/types";
 import {
   appendTasks,
+  cleanupDone,
   loadDayState,
   markFollowupAddressed,
+  moveTaskBefore,
   removeTask,
   replaceTasks,
   saveDayState,
   setAnswer,
+  setPriority,
   todayKey,
   toggleTask,
   updateTask,
@@ -218,6 +221,11 @@ export default function TodayClient({ events, loadError }: Props) {
         onEditPending={(id, patch) => setState((s) => updateTask(s, id, patch))}
         onDeletePending={(id) => setState((s) => removeTask(s, id))}
         onToggleApproved={(id) => setState((s) => toggleTask(s, id))}
+        onTogglePriority={(id, on) => setState((s) => setPriority(s, id, on))}
+        onMoveBefore={(fromId, beforeId) =>
+          setState((s) => moveTaskBefore(s, fromId, beforeId))
+        }
+        onCleanupDone={() => setState((s) => cleanupDone(s))}
       />
 
       <main className="flex-1 ml-[320px] px-8 py-10 max-w-3xl">
@@ -300,6 +308,9 @@ function Sidebar({
   onEditPending,
   onDeletePending,
   onToggleApproved,
+  onTogglePriority,
+  onMoveBefore,
+  onCleanupDone,
 }: {
   pendingTasks: Task[];
   approvedTasks: Task[];
@@ -310,9 +321,34 @@ function Sidebar({
   onEditPending: (id: string, patch: Partial<Task>) => void;
   onDeletePending: (id: string) => void;
   onToggleApproved: (id: string) => void;
+  onTogglePriority: (id: string, on: boolean) => void;
+  onMoveBefore: (fromId: string, beforeId: string | null) => void;
+  onCleanupDone: () => void;
 }) {
   const done = approvedTasks.filter((t) => t.done).length;
   const hasPending = pendingTasks.length > 0;
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+
+  function handleDragStart(id: string) {
+    setDraggingId(id);
+  }
+  function handleDragOver(e: React.DragEvent, id: string) {
+    if (!draggingId) return;
+    e.preventDefault();
+    if (id !== dragOverId) setDragOverId(id);
+  }
+  function handleDrop(targetId: string | null) {
+    if (draggingId && draggingId !== targetId) {
+      onMoveBefore(draggingId, targetId);
+    }
+    setDraggingId(null);
+    setDragOverId(null);
+  }
+  function handleDragEnd() {
+    setDraggingId(null);
+    setDragOverId(null);
+  }
 
   return (
     <aside className="fixed left-0 top-0 bottom-0 w-[320px] bg-white border-r border-ink/10 overflow-y-auto flex flex-col">
@@ -354,8 +390,17 @@ function Sidebar({
                   key={task.id}
                   task={task}
                   event={task.eventId ? eventsById[task.eventId] : undefined}
+                  isDragging={draggingId === task.id}
+                  isDragOver={dragOverId === task.id}
+                  onDragStart={() => handleDragStart(task.id)}
+                  onDragOver={(e) => handleDragOver(e, task.id)}
+                  onDrop={() => handleDrop(task.id)}
+                  onDragEnd={handleDragEnd}
                   onEdit={(patch) => onEditPending(task.id, patch)}
                   onDelete={() => onDeletePending(task.id)}
+                  onTogglePriority={() =>
+                    onTogglePriority(task.id, task.priority !== "high")
+                  }
                 />
               ))}
             </ul>
@@ -363,12 +408,31 @@ function Sidebar({
         )}
 
         <section>
-          {hasPending && (
-            <h3 className="px-4 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-ink/40">
-              Approved · {approvedTasks.length}
-            </h3>
-          )}
-          <ul className="px-2 pb-3 space-y-1">
+          <div className="flex items-center justify-between px-4 pt-3 pb-1">
+            {hasPending ? (
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink/40">
+                Approved · {approvedTasks.length}
+              </h3>
+            ) : (
+              <span />
+            )}
+            {done > 0 && (
+              <button
+                onClick={onCleanupDone}
+                className="text-[11px] uppercase tracking-wider text-ink/40 hover:text-red-700"
+                title={`Remove ${done} done task${done > 1 ? "s" : ""} from this list`}
+              >
+                Clean up done · {done}
+              </button>
+            )}
+          </div>
+          <ul
+            className="px-2 pb-3 space-y-1"
+            onDragOver={(e) => {
+              if (draggingId) e.preventDefault();
+            }}
+            onDrop={() => handleDrop(null)}
+          >
             {approvedTasks.length === 0 && !hasPending && (
               <li className="px-2 py-3 text-sm text-ink/50">
                 Answer prep questions on the right, then generate tasks.
@@ -378,7 +442,16 @@ function Sidebar({
               <ApprovedRow
                 key={task.id}
                 task={task}
+                isDragging={draggingId === task.id}
+                isDragOver={dragOverId === task.id}
+                onDragStart={() => handleDragStart(task.id)}
+                onDragOver={(e) => handleDragOver(e, task.id)}
+                onDrop={() => handleDrop(task.id)}
+                onDragEnd={handleDragEnd}
                 onToggle={() => onToggleApproved(task.id)}
+                onTogglePriority={() =>
+                  onTogglePriority(task.id, task.priority !== "high")
+                }
               />
             ))}
           </ul>
@@ -388,26 +461,90 @@ function Sidebar({
   );
 }
 
+function PriorityButton({
+  active,
+  onClick,
+}: {
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick();
+      }}
+      className={`shrink-0 px-1 leading-none transition ${
+        active
+          ? "opacity-100"
+          : "opacity-25 grayscale hover:opacity-60 hover:grayscale-0"
+      }`}
+      aria-label={active ? "Unflag high priority" : "Flag high priority"}
+      aria-pressed={active}
+      title={active ? "High priority — click to unflag" : "Flag as high priority"}
+    >
+      <span className="text-base">🔥</span>
+    </button>
+  );
+}
+
 function PendingRow({
   task,
   event,
+  isDragging,
+  isDragOver,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
   onEdit,
   onDelete,
+  onTogglePriority,
 }: {
   task: Task;
   event: CalendarEvent | undefined;
+  isDragging: boolean;
+  isDragOver: boolean;
+  onDragStart: () => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
   onEdit: (patch: Partial<Task>) => void;
   onDelete: () => void;
+  onTogglePriority: () => void;
 }) {
+  const high = task.priority === "high";
   return (
-    <li className="px-2 py-2 rounded border border-dashed border-accent/40 bg-white">
+    <li
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop();
+      }}
+      onDragEnd={onDragEnd}
+      className={`px-2 py-2 rounded border border-dashed bg-white transition ${
+        isDragging ? "opacity-40" : ""
+      } ${isDragOver ? "border-accent border-solid" : "border-accent/40"} ${
+        high ? "ring-1 ring-orange-400/60" : ""
+      }`}
+    >
       <div className="flex items-start gap-1">
+        <span
+          className="cursor-grab text-ink/30 select-none px-0.5 leading-none"
+          title="Drag to reorder"
+        >
+          ⋮⋮
+        </span>
         <input
           type="text"
           value={task.title}
           onChange={(e) => onEdit({ title: e.target.value })}
           className="flex-1 min-w-0 text-sm bg-transparent border-0 px-1 py-0.5 focus:outline-none focus:bg-ink/5 rounded"
         />
+        <PriorityButton active={high} onClick={onTogglePriority} />
         <button
           onClick={onDelete}
           className="text-ink/40 hover:text-red-700 px-1 leading-none"
@@ -440,10 +577,24 @@ function PendingRow({
 
 function ApprovedRow({
   task,
+  isDragging,
+  isDragOver,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
   onToggle,
+  onTogglePriority,
 }: {
   task: Task;
+  isDragging: boolean;
+  isDragOver: boolean;
+  onDragStart: () => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
   onToggle: () => void;
+  onTogglePriority: () => void;
 }) {
   const dueLabel = task.dueBefore
     ? new Date(task.dueBefore).toLocaleTimeString([], {
@@ -451,10 +602,29 @@ function ApprovedRow({
         minute: "2-digit",
       })
     : null;
+  const high = task.priority === "high";
 
   return (
-    <li>
-      <label className="flex items-start gap-2 px-2 py-2 rounded hover:bg-ink/5 cursor-pointer">
+    <li
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop();
+      }}
+      onDragEnd={onDragEnd}
+      className={`rounded transition ${isDragging ? "opacity-40" : ""} ${
+        isDragOver ? "ring-1 ring-accent" : ""
+      } ${high ? "bg-orange-50/60" : ""}`}
+    >
+      <div className="flex items-start gap-2 px-2 py-2 rounded hover:bg-ink/5">
+        <span
+          className="cursor-grab text-ink/30 select-none mt-0.5 leading-none"
+          title="Drag to reorder"
+        >
+          ⋮⋮
+        </span>
         <input
           type="checkbox"
           checked={task.done}
@@ -483,7 +653,8 @@ function ApprovedRow({
             )}
           </div>
         </div>
-      </label>
+        <PriorityButton active={high} onClick={onTogglePriority} />
+      </div>
     </li>
   );
 }

@@ -25,6 +25,7 @@ export type Task = {
   done: boolean;
   status: TaskStatus;
   origin: TaskOrigin;
+  priority?: "high";
   jiraKey?: string;
   jiraUrl?: string;
 };

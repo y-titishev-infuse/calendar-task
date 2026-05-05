@@ -84,6 +84,38 @@ export function toggleTask(state: DayState, taskId: string): DayState {
   });
 }
 
+export function setPriority(
+  state: DayState,
+  taskId: string,
+  high: boolean,
+): DayState {
+  return updateTask(state, taskId, { priority: high ? "high" : undefined });
+}
+
+export function cleanupDone(state: DayState): DayState {
+  return { ...state, tasks: state.tasks.filter((t) => !t.done) };
+}
+
+export function moveTaskBefore(
+  state: DayState,
+  fromId: string,
+  beforeId: string | null,
+): DayState {
+  if (fromId === beforeId) return state;
+  const fromIdx = state.tasks.findIndex((t) => t.id === fromId);
+  if (fromIdx === -1) return state;
+  const moving = state.tasks[fromIdx];
+  const without = state.tasks.filter((t) => t.id !== fromId);
+  if (beforeId === null) {
+    return { ...state, tasks: [...without, moving] };
+  }
+  const targetIdx = without.findIndex((t) => t.id === beforeId);
+  if (targetIdx === -1) return state;
+  const next = [...without];
+  next.splice(targetIdx, 0, moving);
+  return { ...state, tasks: next };
+}
+
 export function markFollowupAddressed(state: DayState, eventId: string): DayState {
   if (state.addressedEventFollowups.includes(eventId)) return state;
   return {
